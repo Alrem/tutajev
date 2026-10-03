@@ -1,0 +1,33 @@
+From: billing@shop.example
+Reply-To: billing@shop.example
+Subject: Your invoice
+Date: Thu, 03 Sep 2026 08:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: multipart/alternative; boundary="ALT"
+
+--ALT
+Content-Type: text/plain; charset=utf-8
+
+Invoice attached. Pay at https://shop.example/pay
+--ALT
+Content-Type: text/html; charset=utf-8
+
+<p>Invoice attached. <a href="https://shop.example/pay">Pay</a></p>
+--ALT--
+--BOUNDARY
+Content-Type: application/pdf; name="invoice.pdf"
+Content-Disposition: attachment; filename="invoice.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcfsj6IKMSAwIG9iago8PD4+CmVuZG9iagp0cmFpbGVyCjw8Pj4KJSVFT0YK
+--BOUNDARY
+Content-Type: image/png
+Content-Disposition: inline; filename="logo.png"
+Content-ID: <logo@shop>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgo=
+--BOUNDARY--

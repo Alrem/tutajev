@@ -1,0 +1,10 @@
+From: =?utf-8?b?0J/RgNC40LfQvtCy?= <prize@lottery.example>
+Reply-To: Claims Desk <claims@other.example>
+To: you@tuta.com
+Subject: =?utf-8?q?You_won_=E2=82=AC1000!?=
+Date: Wed, 02 Sep 2026 12:30:00 +0200
+Content-Type: text/html; charset=utf-8
+
+<html><head><title>T</title><style>p{color:red}</style><script>var u="https://evil.example/js";</script></head>
+<body><p>Claim your <b>prize</b> now:</p><a href="https://claim.example/win?id=7">click here</a>
+<img src="https://tracker.example/pixel.gif"><a href="mailto:x@y.z">mail</a></body></html>
