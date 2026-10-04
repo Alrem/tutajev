@@ -67,6 +67,9 @@ class FakeMail:
     attachments: list[tuple[str, str, int, str]] = field(default_factory=list)
     session_key: bytes = field(default_factory=lambda: os.urandom(32))
     unread: bool = False
+    # Original transport headers; stored compressed unless headers_plain is set.
+    headers: str = ""
+    headers_plain: bool = False
 
 
 class FakeTutaClient:
@@ -153,6 +156,13 @@ class FakeTutaClient:
                 for name, addr in m.reply_tos
             ],
         }
+        if m.headers and m.headers_plain:
+            details["1287"] = [{"1271": _enc(m.session_key, m.headers)}]
+        elif m.headers:
+            compressed = crypto.aes_encrypt_tuta(
+                m.session_key, crypto.compress_lz4(m.headers.encode())
+            )
+            details["1287"] = [{"1272": base64.b64encode(compressed).decode()}]
         return {"1305": [details]}
 
     def _url(self, app: str, service: str, *ids: str) -> str:
@@ -218,7 +228,15 @@ def _reader(client: FakeTutaClient, allow_move: bool = False) -> Any:
 
 def _mails() -> list[FakeMail]:
     return [
-        FakeMail("old", 1_000_000, "Old", ("Old Sender", "old@example.com"), "<p>old</p>"),
+        FakeMail(
+            "old",
+            1_000_000,
+            "Old",
+            ("Old Sender", "old@example.com"),
+            "<p>old</p>",
+            headers="Authentication-Results: mx.example; spf=pass\r\n",
+            headers_plain=True,
+        ),
         FakeMail(
             "new",
             3_000_000,
@@ -226,6 +244,12 @@ def _mails() -> list[FakeMail]:
             ("Банк", "bank@spam.example"),
             '<p>Click <a href="https://phish.example/login">here</a></p>',
             reply_tos=[("Support", "collect@else.example")],
+            headers=(
+                "Received: from relay.example\r\n"
+                "Authentication-Results: w10.tutanota.de (dis=spam);\r\n"
+                " dmarc=fail (dis=spam p=quarantine) header.from=spam.example\r\n"
+                "Subject: ignored\r\n"
+            ),
             attachments=[
                 ("invoice.zip", "application/zip", 4096, ""),
                 ("i.png", "image/png", 12, "c1"),
@@ -251,6 +275,10 @@ async def test_lists_newest_messages_and_extracts_fields() -> None:
     assert (summary.sender.name, summary.sender.email) == ("Банк", "bank@spam.example")
     assert [(a.name, a.email) for a in summary.reply_to] == [("Support", "collect@else.example")]
     assert summary.reply_to_differs is True
+    assert summary.authentication_results == (
+        "w10.tutanota.de (dis=spam); dmarc=fail (dis=spam p=quarantine) header.from=spam.example",
+    )
+    assert summary.subject == "Free money"
     assert "https://phish.example/login" in summary.urls
     assert "Click here" in summary.text_body
     assert [
@@ -419,3 +447,13 @@ def test_telemetry_module_is_never_imported() -> None:
     assert "tuta.api" in sys.modules
     assert "tuta.telemetry" not in sys.modules
     assert os.environ.get("TUTAPROXY_TELEMETRY") == "false"
+
+
+async def test_reads_uncompressed_original_headers() -> None:
+    async with _reader(FakeTutaClient(_mails())) as reader:
+        raw_messages = await reader.list_recent(limit=None)
+
+    old = parse_message(next(r for r in raw_messages if r.id == "old"))
+    mid = parse_message(next(r for r in raw_messages if r.id == "mid"))
+    assert old.authentication_results == ("mx.example; spf=pass",)
+    assert mid.authentication_results == ()

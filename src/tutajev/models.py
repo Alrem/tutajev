@@ -51,3 +51,5 @@ class MessageSummary:
     has_html: bool
     reply_to_differs: bool = field(default=False)
     folder: str = ""
+    # Raw Authentication-Results header values, as added by the receiving servers.
+    authentication_results: tuple[str, ...] = ()

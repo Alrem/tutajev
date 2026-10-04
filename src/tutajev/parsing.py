@@ -170,4 +170,7 @@ def parse_message(raw: RawMessage) -> MessageSummary:
         has_html=bool(html_parts),
         reply_to_differs=reply_to_differs,
         folder=raw.folder,
+        authentication_results=tuple(
+            " ".join(str(v).split()) for v in msg.get_all("Authentication-Results") or []
+        ),
     )

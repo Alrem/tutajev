@@ -325,3 +325,34 @@ def test_default_factory_builds_clef(creds: None, clean_env: pytest.MonkeyPatch)
     classifier = default_classifier_factory(load_settings(None))
     assert isinstance(classifier, ClefClassifier)
     assert classifier._url.endswith("/accounts/acc/ai/run/@cf/cloudflare/clef-flash")
+
+
+def _dmarc_failing_message() -> RawMessage:
+    raw = load_eml("plain.eml")
+    header = b"Authentication-Results: w10.tutanota.de; dmarc=fail (dis=spam p=quarantine)\r\n"
+    return dataclasses.replace(raw, raw=header + raw.raw)
+
+
+@pytest.mark.parametrize(("dmarc_rule", "moved"), [(False, []), (True, ["plain.eml"])])
+def test_dmarc_rule_moves_unsigned_dmarc_failures(
+    creds: None, capsys: pytest.CaptureFixture[str], dmarc_rule: bool, moved: list[str]
+) -> None:
+    reader = FakeReader([_dmarc_failing_message()])
+    argv = ["--move-spam", "--apply", "--format", "table", "--env-file", "/nonexistent"]
+    code = main(
+        argv + (["--dmarc-rule"] if dmarc_rule else []),
+        reader_factory=lambda s, a: reader,
+        classifier_factory=lambda s: FakeClassifier(),
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert reader.moved == moved
+    assert out.rstrip().endswith("[dmarc]") is dmarc_rule
+    assert out.split()[0] == (">>" if dmarc_rule else "inbox")
+
+
+def test_dmarc_rule_requires_move_spam(creds: None) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["--dmarc-rule", "--env-file", "/nonexistent"])
+    assert exc.value.code == 2

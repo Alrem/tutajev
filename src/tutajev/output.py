@@ -22,6 +22,8 @@ class Result:
     error: str | None = None
     # "moved_to_spam", "would_move_to_spam" (dry run) or None
     action: str | None = None
+    # Why the message is moved: "score" (classifier) or "dmarc" (rules.dmarc_quarantined).
+    reason: str | None = None
 
 
 def _json_default(value: Any) -> Any:
@@ -50,6 +52,7 @@ def render_json(results: Sequence[Result], include_classification: bool = False)
         if include_classification:
             item["classification"] = _verdict_dict(r)
             item["action"] = r.action
+            item["reason"] = r.reason
         items.append(item)
     return json.dumps(items, default=_json_default, ensure_ascii=False, indent=2)
 
@@ -87,7 +90,7 @@ def render_text(results: Sequence[Result], include_classification: bool = False)
         if include_classification:
             lines.append(f"verdict:     {_fmt_verdict(r)}")
             if r.action:
-                lines.append(f"action:      {r.action}")
+                lines.append(f"action:      {r.action} ({r.reason})")
         lines += [
             f"has html:    {'yes' if m.has_html else 'no'}",
             f"urls ({len(m.urls)}):",
@@ -107,7 +110,8 @@ def render_text(results: Sequence[Result], include_classification: bool = False)
 def render_summary_table(results: Sequence[Result]) -> str:
     """One line per message: action marker, folder, verdict, spam score, sender and subject.
 
-    Marker: ``>>`` moved to Spam, ``~>`` would be moved (dry run).
+    Marker: ``>>`` moved to Spam, ``~>`` would be moved (dry run). Messages moved by the
+    DMARC rule rather than by their score end with ``[dmarc]``.
     """
     lines = []
     for r in results:
@@ -117,7 +121,6 @@ def render_summary_table(results: Sequence[Result]) -> str:
         sender = m.sender.email if m.sender else "-"
         marker = _ACTION_MARKERS.get(r.action or "", "  ")
         folder = m.folder[:12]
-        lines.append(
-            f"{marker} {folder:<12} {verdict:<12} {score}  {sender[:32]:<32}  {m.subject[:60]}"
-        )
+        line = f"{marker} {folder:<12} {verdict:<12} {score}  {sender[:32]:<32}  {m.subject[:60]}"
+        lines.append(line + ("  [dmarc]" if r.reason == "dmarc" else ""))
     return "\n".join(lines)

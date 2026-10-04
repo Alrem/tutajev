@@ -20,6 +20,7 @@ from tutajev.mailbox import MailboxError, MailboxReader, SpamMover
 from tutajev.models import MessageSummary, RawMessage
 from tutajev.output import Result, render_json, render_summary_table, render_text
 from tutajev.parsing import parse_message
+from tutajev.rules import dmarc_quarantined
 
 logger = logging.getLogger(__name__)
 
@@ -99,25 +100,37 @@ async def classify_all(
         return list(await asyncio.gather(*(one(m) for m in summaries)))
 
 
+def _move_reason(result: Result, threshold: float, dmarc_rule: bool) -> str | None:
+    if result.verdict is not None and result.verdict.spam_score >= threshold:
+        return "score"
+    if dmarc_rule and dmarc_quarantined(result.message):
+        return "dmarc"
+    return None
+
+
 async def move_spam(
-    reader: MailboxReader, results: Sequence[Result], threshold: float, apply: bool
+    reader: MailboxReader,
+    results: Sequence[Result],
+    threshold: float,
+    apply: bool,
+    dmarc_rule: bool = False,
 ) -> list[Result]:
     """Move results whose spam score reaches ``threshold`` to Spam; only report unless ``apply``.
 
-    Messages whose classification failed are never moved.
+    With ``dmarc_rule``, messages that Tuta marked as failing DMARC with a quarantine or reject
+    policy are moved too. Otherwise messages whose classification failed are never moved.
     """
-    candidates = {
-        r.message.id for r in results if r.verdict is not None and r.verdict.spam_score >= threshold
-    }
+    reasons = {r.message.id: _move_reason(r, threshold, dmarc_rule) for r in results}
+    candidates = {message_id for message_id, reason in reasons.items() if reason}
     for r in results:
         if r.message.id in candidates:
-            assert r.verdict is not None
             logger.info(
-                "%s %s: %s %.2f, from %s, subject %r",
+                "%s %s (%s): %s %s, from %s, subject %r",
                 "Moving" if apply else "Would move",
                 r.message.id,
-                r.verdict.label,
-                r.verdict.spam_score,
+                reasons[r.message.id],
+                r.verdict.label if r.verdict else "unclassified",
+                f"{r.verdict.spam_score:.2f}" if r.verdict else "-",
                 r.message.sender.email if r.message.sender else "-",
                 r.message.subject,
             )
@@ -135,7 +148,10 @@ async def move_spam(
 
     action = "moved_to_spam" if apply else "would_move_to_spam"
     return [
-        dataclasses.replace(r, action=action) if r.message.id in candidates else r for r in results
+        dataclasses.replace(r, action=action, reason=reasons[r.message.id])
+        if r.message.id in candidates
+        else r
+        for r in results
     ]
 
 
@@ -161,7 +177,7 @@ async def run(
             return [Result(m) for m in summaries]
         results = await classify_all(classifier, summaries)
         if args.move_spam:
-            results = await move_spam(reader, results, args.threshold, apply)
+            results = await move_spam(reader, results, args.threshold, apply, args.dmarc_rule)
     return results
 
 
@@ -219,6 +235,12 @@ def build_parser() -> argparse.ArgumentParser:
         f"default {DEFAULT_THRESHOLD}",
     )
     parser.add_argument(
+        "--dmarc-rule",
+        action="store_true",
+        help="With --move-spam, also move messages that Tuta marked as failing DMARC with a "
+        "quarantine or reject policy, whatever their spam score",
+    )
+    parser.add_argument(
         "--apply", action="store_true", help="Actually move messages (only with --move-spam)"
     )
     parser.add_argument(
@@ -255,6 +277,8 @@ def main(
     args = parser.parse_args(argv)
     if args.apply and not args.move_spam:
         parser.error("--apply requires --move-spam")
+    if args.dmarc_rule and not args.move_spam:
+        parser.error("--dmarc-rule requires --move-spam")
     if args.format == "table" or args.move_spam:
         args.classify = True
 

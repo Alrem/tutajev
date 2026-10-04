@@ -44,7 +44,14 @@ the links and attachment metadata. It does not contain attachment contents.
 uv run tutajev --move-spam --format table          # dry run: marks candidates with "~>"
 uv run tutajev --move-spam --apply --format table  # really moves them; marked with ">>"
 uv run tutajev --move-spam --threshold 0.95        # stricter threshold (default 0.9)
+uv run tutajev --move-spam --dmarc-rule            # also apply the DMARC rule (dry run)
 ```
+
+`--dmarc-rule` moves messages regardless of their score when Tuta's own `Authentication-Results`
+header reports `dmarc=fail` with a quarantine or reject disposition and no `dkim=pass` at all. Tuta
+marks such mail as spam but may still deliver it to the Inbox. Signed newsletters that only fail
+DMARC alignment because a mailing service signs them are left alone. Rows moved by this rule end
+with `[dmarc]`.
 
 A message is moved when its `spam_score` reaches the threshold. Moving works from any checked folder
 except Spam and Trash.

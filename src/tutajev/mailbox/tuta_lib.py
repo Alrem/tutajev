@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import email
+import email.parser
 import email.policy
 import email.utils
 import importlib
@@ -53,6 +54,9 @@ INSTANCE_KEY_ELEMENT_ID = "2041"
 INSTANCE_KEY_ENC_SESSION_KEY = "2042"
 MAIL_DETAILS_BLOB_DETAILS = "1305"
 MAIL_DETAILS_REPLY_TOS = "1285"
+MAIL_DETAILS_HEADERS = "1287"
+HEADER_HEADERS = "1271"
+HEADER_COMPRESSED_HEADERS = "1272"
 ENC_MAIL_ADDRESS_NAME = "614"
 ENC_MAIL_ADDRESS_ADDRESS = "615"
 FILE_OWNER_ENC_SESSION_KEY = "18"
@@ -343,10 +347,14 @@ class TutaLibReader:
         raw = _drop_synthesized_plain_text(
             self._tuta.message_builder.build_rfc2822(mail, details_blob, mail_key, None)
         )
+        # build_rfc2822 omits Reply-To and the original transport headers; header order is
+        # irrelevant, so prepend the ones the parser needs.
+        extra = [f"Authentication-Results: {v}" for v in self._auth_results(details_blob, mail_key)]
         reply_to = self._reply_to_header(details_blob, mail_key)
         if reply_to:
-            # build_rfc2822 omits Reply-To; header order is irrelevant, so prepend it.
-            raw = f"Reply-To: {reply_to}\r\n".encode() + raw
+            extra.append(f"Reply-To: {reply_to}")
+        if extra:
+            raw = "".join(f"{line}\r\n" for line in extra).encode() + raw
 
         attachments = await self._attachment_metadata(mail, keys)
         received_ms = int(mail.get(MAIL_RECEIVED_DATE) or 0)
@@ -357,6 +365,25 @@ class TutaLibReader:
             attachments=tuple(attachments),
             folder=folder,
         )
+
+    def _auth_results(self, details_blob: dict[str, Any], mail_key: bytes) -> list[str]:
+        """Authentication-Results values from the original headers (MailDetails.headers)."""
+        details = _first(details_blob.get(MAIL_DETAILS_BLOB_DETAILS))
+        header = _first(details.get(MAIL_DETAILS_HEADERS))
+        try:
+            if header.get(HEADER_COMPRESSED_HEADERS):
+                crypto = self._tuta.crypto
+                data = crypto.aes_decrypt_tuta(
+                    mail_key, base64.b64decode(header[HEADER_COMPRESSED_HEADERS])
+                )
+                text = crypto.uncompress_lz4(data).decode("utf-8", "replace")
+            else:
+                text = self._decrypt_str(mail_key, header.get(HEADER_HEADERS) or "")
+        except Exception as exc:
+            logger.warning("Cannot read original headers: %s", exc)
+            return []
+        parsed = email.parser.HeaderParser(policy=email.policy.compat32).parsestr(text + "\n\n")
+        return [_one_line(str(v)) for v in parsed.get_all("Authentication-Results") or []]
 
     def _reply_to_header(self, details_blob: dict[str, Any], mail_key: bytes) -> str:
         details = _first(details_blob.get(MAIL_DETAILS_BLOB_DETAILS))
