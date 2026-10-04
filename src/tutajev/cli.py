@@ -14,7 +14,7 @@ import sys
 from collections.abc import Callable, Sequence
 
 from tutajev.classifier import ClassifierError, SpamClassifier
-from tutajev.config import ConfigError, Settings, load_settings
+from tutajev.config import CLASSIFIERS, ConfigError, Settings, load_settings
 from tutajev.logging_setup import configure_logging
 from tutajev.mailbox import MailboxError, MailboxReader, SpamMover
 from tutajev.models import MessageSummary, RawMessage
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # (settings, allow_move_to_spam) -> reader; move permission is granted only for --apply.
 ReaderFactory = Callable[[Settings, bool], MailboxReader]
+# Builds the backend named by settings.classifier.
 ClassifierFactory = Callable[[Settings], SpamClassifier]
 
 DEFAULT_THRESHOLD = 0.9
@@ -49,6 +50,19 @@ def default_reader_factory(settings: Settings, allow_move_to_spam: bool) -> Mail
 
 
 def default_classifier_factory(settings: Settings) -> SpamClassifier:
+    if settings.classifier in ("clef", "clef-flash"):
+        from tutajev.classifier.clef import ClefClassifier
+
+        if not (settings.cloudflare_account_id and settings.cloudflare_api_token):
+            raise ConfigError(
+                "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required for Clef"
+            )
+        return ClefClassifier(
+            account_id=settings.cloudflare_account_id,
+            api_token=settings.cloudflare_api_token,
+            model="clef-flash" if settings.classifier == "clef-flash" else "clef",
+        )
+
     from tutajev.classifier.jev import JevClassifier
 
     if not settings.typesafe_api_key:
@@ -183,7 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--classify",
         action="store_true",
-        help="Classify messages with Jev (sends content to TypeSafe)",
+        help="Classify messages (sends content to TypeSafe or Cloudflare, see --classifier)",
+    )
+    parser.add_argument(
+        "--classifier",
+        choices=CLASSIFIERS,
+        help="Classification backend: Jev (TypeSafe) or Cloudflare Clef; "
+        "default: TUTAJEV_CLASSIFIER from the environment, else jev",
     )
     parser.add_argument(
         "--move-spam",
@@ -246,6 +266,8 @@ def main(
         return 2
     configure_logging((args.log_level or settings.log_level).upper())
     args.folder = list(dict.fromkeys(args.folder or settings.folders))
+    if args.classifier:
+        settings = dataclasses.replace(settings, classifier=args.classifier)
     if args.limit is None and args.all:
         args.limit = DEFAULT_ALL_LIMIT
     if args.move_spam and _NO_MOVE_FOLDERS & {f.lower() for f in args.folder}:

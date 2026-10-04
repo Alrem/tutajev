@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 DEFAULT_TUTAPROXY_PATH = "./vendor/tutaproxy"
+CLASSIFIERS = ("jev", "clef", "clef-flash")
 
 
 class ConfigError(Exception):
@@ -22,6 +23,9 @@ class Settings:
     tuta_totp_secret: str = field(default="", repr=False)
     tutaproxy_path: Path = Path(DEFAULT_TUTAPROXY_PATH)
     typesafe_api_key: str = field(default="", repr=False)
+    cloudflare_account_id: str = ""
+    cloudflare_api_token: str = field(default="", repr=False)
+    classifier: str = "jev"
     folders: tuple[str, ...] = ("inbox",)
     log_level: str = "INFO"
 
@@ -46,12 +50,21 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env") -> Settings:
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ConfigError(f"Invalid LOG_LEVEL: {log_level}")
 
+    classifier = os.environ.get("TUTAJEV_CLASSIFIER", "jev").strip().lower() or "jev"
+    if classifier not in CLASSIFIERS:
+        raise ConfigError(
+            f"Invalid TUTAJEV_CLASSIFIER: {classifier} (expected one of {', '.join(CLASSIFIERS)})"
+        )
+
     return Settings(
         tuta_email=email,
         tuta_password=password,
         tuta_totp_secret=os.environ.get("TUTA_TOTP_SECRET", "").strip(),
         tutaproxy_path=Path(os.environ.get("TUTAPROXY_PATH", DEFAULT_TUTAPROXY_PATH)).expanduser(),
         typesafe_api_key=os.environ.get("TYPESAFE_API_KEY", "").strip(),
+        cloudflare_account_id=os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip(),
+        cloudflare_api_token=os.environ.get("CLOUDFLARE_API_TOKEN", "").strip(),
+        classifier=classifier,
         folders=_parse_folders(os.environ.get("TUTAJEV_FOLDERS", "")),
         log_level=log_level,
     )

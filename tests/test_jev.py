@@ -9,13 +9,8 @@ from typesafe_sdk import Choice, TypeSafeAuthenticationError
 
 from tests.conftest import load_eml
 from tutajev.classifier import ClassifierError
-from tutajev.classifier.jev import (
-    CRITERIA,
-    MAX_BODY_CHARS,
-    QUESTION_NAME,
-    JevClassifier,
-    build_state,
-)
+from tutajev.classifier.jev import JevClassifier
+from tutajev.classifier.prompt import CRITERIA, MAX_BODY_CHARS, QUESTION_NAME, build_state
 from tutajev.models import MessageSummary
 from tutajev.parsing import parse_message
 

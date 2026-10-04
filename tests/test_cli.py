@@ -10,8 +10,8 @@ import pytest
 
 from tests.conftest import load_eml
 from tutajev.classifier import ClassifierError, Verdict
-from tutajev.cli import main
-from tutajev.config import Settings
+from tutajev.cli import default_classifier_factory, main
+from tutajev.config import Settings, load_settings
 from tutajev.mailbox import MailboxError
 from tutajev.models import MessageSummary, RawMessage
 
@@ -284,3 +284,44 @@ def test_limit_caps_unread_mode(creds: None) -> None:
     code = main(["--limit", "5", "--env-file", "/nonexistent"], reader_factory=lambda s, a: reader)
     assert code == 0
     assert reader.calls == [("inbox", 5, True)]
+
+
+def test_classifier_flag_overrides_settings(creds: None, clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("TUTAJEV_CLASSIFIER", "jev")
+    seen: list[str] = []
+
+    def classifier_factory(settings: Settings) -> FakeClassifier:
+        seen.append(settings.classifier)
+        return FakeClassifier()
+
+    assert (
+        main(
+            ["--classify", "--classifier", "clef-flash", "--env-file", "/nonexistent"],
+            reader_factory=lambda s, a: FakeReader([]),
+            classifier_factory=classifier_factory,
+        )
+        == 0
+    )
+    assert seen == ["clef-flash"]
+
+
+def test_clef_requires_cloudflare_credentials(
+    creds: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(
+        ["--classify", "--classifier", "clef", "--env-file", "/nonexistent"],
+        reader_factory=lambda s, a: FakeReader([]),
+    )
+    assert code == 2
+    assert "CLOUDFLARE_ACCOUNT_ID" in capsys.readouterr().err
+
+
+def test_default_factory_builds_clef(creds: None, clean_env: pytest.MonkeyPatch) -> None:
+    from tutajev.classifier.clef import ClefClassifier
+
+    clean_env.setenv("TUTAJEV_CLASSIFIER", "clef-flash")
+    clean_env.setenv("CLOUDFLARE_ACCOUNT_ID", "acc")
+    clean_env.setenv("CLOUDFLARE_API_TOKEN", "tok")
+    classifier = default_classifier_factory(load_settings(None))
+    assert isinstance(classifier, ClefClassifier)
+    assert classifier._url.endswith("/accounts/acc/ai/run/@cf/cloudflare/clef-flash")

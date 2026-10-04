@@ -24,6 +24,9 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
         "TUTAPROXY_PATH",
         "LOG_LEVEL",
         "TYPESAFE_API_KEY",
+        "TUTAJEV_CLASSIFIER",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN",
         "TUTAJEV_FOLDERS",
     ):
         monkeypatch.delenv(var, raising=False)

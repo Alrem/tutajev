@@ -23,7 +23,7 @@ uv run tutajev --list-folders
 
 The pipeline runs inside one Tuta session (`cli.run`): `MailboxReader.list_recent` → `parsing.parse_message` → `SpamClassifier.classify` → optionally `SpamMover.move_to_spam` → `output.render_*`. Moves must happen while the reader is still open, because the adapter only moves ids it listed in the same session.
 
-**Ports and adapters.** `mailbox/port.py` and `classifier/port.py` define Protocols. Only `mailbox/tuta_lib.py` imports tutaproxy, and only `classifier/jev.py` imports `typesafe_sdk`. Adapters return `RawMessage` objects that hold RFC 822 bytes plus optional attachment metadata, so `parsing.py` does not depend on the backend. The CLI takes reader and classifier factories, and the tests inject fakes through them.
+**Ports and adapters.** `mailbox/port.py` and `classifier/port.py` define Protocols. Only `mailbox/tuta_lib.py` imports tutaproxy, only `classifier/jev.py` imports `typesafe_sdk`, and `classifier/clef.py` calls Cloudflare Workers AI over aiohttp. The question and message state live in `classifier/prompt.py` and are shared by both backends so their scores stay comparable. Adapters return `RawMessage` objects that hold RFC 822 bytes plus optional attachment metadata, so `parsing.py` does not depend on the backend. The CLI takes reader and classifier factories, and the tests inject fakes through them.
 
 **tutaproxy used as a library, not a server.** `load_tuta()` puts `vendor/tutaproxy` on `sys.path` and imports only `tuta.api`, `tuta.crypto` and `tuta.message_builder`. Never import `tuta.telemetry`, which phones home; a test asserts this. Tuta entities are dicts keyed by numeric field ids. Look up ids in Tuta's type models, `tuta-sdk/rust/sdk/src/type_models/{tutanota,sys}.json` in tutao/tutanota, and keep them as named constants at the top of `tuta_lib.py`.
 
@@ -41,7 +41,7 @@ The pipeline runs inside one Tuta session (`cli.run`): `MailboxReader.list_recen
 **Selection and classification.**
 - By default the tool checks all unread messages (Mail field 109) of every folder in `TUTAJEV_FOLDERS`. `--all` switches to the newest N messages instead.
 - Custom folders are matched by their decrypted name.
-- Jev answers a single `Choice` with the labels legitimate, promotional, spam and phishing. `Verdict.spam_score` is P(spam) + P(phishing).
+- The classifier (`TUTAJEV_CLASSIFIER` / `--classifier`: jev, clef, clef-flash) answers a single `Choice` with the labels legitimate, promotional, spam and phishing. `Verdict.spam_score` is P(spam) + P(phishing).
 - A message is moved when `spam_score >= --threshold` (default 0.9). Messages whose classification failed are never moved.
 
 Mailbox mutations are run as a dry run first and applied only after the user confirms.

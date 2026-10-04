@@ -59,3 +59,30 @@ def test_folders_parsing(clean_env: pytest.MonkeyPatch) -> None:
     assert load_settings(None).folders == ("inbox",)
     clean_env.setenv("TUTAJEV_FOLDERS", " inbox , Newsletters,,inbox ")
     assert load_settings(None).folders == ("inbox", "Newsletters")
+
+
+def test_classifier_defaults_to_jev(clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("TUTA_EMAIL", "a@b.c")
+    clean_env.setenv("TUTA_PASSWORD", "x")
+    assert load_settings(None).classifier == "jev"
+
+
+def test_clef_settings(clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("TUTA_EMAIL", "a@b.c")
+    clean_env.setenv("TUTA_PASSWORD", "x")
+    clean_env.setenv("TUTAJEV_CLASSIFIER", "Clef-Flash")
+    clean_env.setenv("CLOUDFLARE_ACCOUNT_ID", "acc")
+    clean_env.setenv("CLOUDFLARE_API_TOKEN", "tok")
+    settings = load_settings(None)
+
+    assert settings.classifier == "clef-flash"
+    assert settings.cloudflare_account_id == "acc"
+    assert "tok" not in repr(settings)
+
+
+def test_invalid_classifier(clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("TUTA_EMAIL", "a@b.c")
+    clean_env.setenv("TUTA_PASSWORD", "x")
+    clean_env.setenv("TUTAJEV_CLASSIFIER", "gpt")
+    with pytest.raises(ConfigError, match="TUTAJEV_CLASSIFIER"):
+        load_settings(None)

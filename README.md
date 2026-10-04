@@ -5,7 +5,9 @@ Spam classifier for [Tuta](https://tuta.com) mail.
 * **Mailbox access:** the `tuta` package from
   [tutaproxy](https://github.com/peix2/tutaproxy-public) (AGPL-3.0), used as a library.
   No local IMAP server is started.
-* **Classification:** [Jev](https://jev-ai.dev/), TypeSafe's calibrated decision model, called through `typesafe-sdk`.
+* **Classification:** [Jev](https://jev-ai.dev/), TypeSafe's calibrated decision model, called through `typesafe-sdk`,
+  or Cloudflare's [Clef / Clef-flash](https://blog.cloudflare.com/clef-decision-models/) decision models on
+  Workers AI, which accept the same request format.
 
 ## Milestone 1: read-only inspection
 
@@ -20,11 +22,20 @@ metadata, and prints the result as JSON or text.
 
 ## Milestone 2: classification (still read-only)
 
-`--classify` sends each message to Jev and attaches a verdict to it: `legitimate`, `promotional`,
+`--classify` sends each message to the classifier and attaches a verdict to it: `legitimate`, `promotional`,
 `spam` or `phishing`. Each verdict includes a confidence value, per-label probabilities and a `spam_score`
 (P(spam) + P(phishing)). Verdicts are only printed. Nothing is moved or flagged in the mailbox.
 
-The request to TypeSafe's API contains the sender, Reply-To, subject, the first 4000 characters of the body,
+The backend is chosen with `TUTAJEV_CLASSIFIER` or `--classifier`: `jev` (the default, needs
+`TYPESAFE_API_KEY`), `clef` or `clef-flash` (need `CLOUDFLARE_ACCOUNT_ID` and a `CLOUDFLARE_API_TOKEN`
+with Workers AI access). Both get the same question and the same message state, so their scores are
+comparable:
+
+```sh
+uv run tutajev --folder spam --all --limit 30 --format table --classifier clef-flash
+```
+
+The request to TypeSafe's or Cloudflare's API contains the sender, Reply-To, subject, the first 4000 characters of the body,
 the links and attachment metadata. It does not contain attachment contents.
 
 ## Milestone 3: moving spam to the Spam folder
@@ -78,7 +89,8 @@ cli.py ──> mailbox.port.MailboxReader (Protocol) ──> parsing.parse_messa
 
 cli.py ──> classifier.port.SpamClassifier (Protocol)
                     ▲
-                    └── classifier.jev.JevClassifier      (the only module that imports typesafe_sdk)
+                    ├── classifier.jev.JevClassifier      (the only module that imports typesafe_sdk)
+                    └── classifier.clef.ClefClassifier    (Workers AI REST API over aiohttp)
 ```
 
 Adapters return `RawMessage` objects that hold RFC 822 bytes, plus optional attachment metadata.
@@ -108,8 +120,8 @@ Tests that use tutaproxy's real crypto are skipped when `vendor/tutaproxy` is mi
 ## Disclaimer
 
 Tuta has no public API. tutaproxy talks to Tuta's internal API, which was reverse-engineered from
-the official client and can change without notice. This project is not affiliated with Tuta or
-TypeSafe. With `--move-spam --apply` it moves messages in your mailbox; run it without `--apply` first.
+the official client and can change without notice. This project is not affiliated with Tuta,
+TypeSafe or Cloudflare. With `--move-spam --apply` it moves messages in your mailbox; run it without `--apply` first.
 
 ## License
 
