@@ -28,6 +28,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
         "CLOUDFLARE_ACCOUNT_ID",
         "CLOUDFLARE_API_TOKEN",
         "TUTAJEV_FOLDERS",
+        "TUTAJEV_VERDICT_CACHE",
     ):
         monkeypatch.delenv(var, raising=False)
     return monkeypatch

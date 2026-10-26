@@ -28,6 +28,8 @@ class Settings:
     classifier: str = "jev"
     folders: tuple[str, ...] = ("inbox",)
     log_level: str = "INFO"
+    # JSON file of cached verdicts; None disables the cache.
+    verdict_cache: Path | None = None
 
 
 def load_settings(env_file: str | os.PathLike[str] | None = ".env") -> Settings:
@@ -67,7 +69,13 @@ def load_settings(env_file: str | os.PathLike[str] | None = ".env") -> Settings:
         classifier=classifier,
         folders=_parse_folders(os.environ.get("TUTAJEV_FOLDERS", "")),
         log_level=log_level,
+        verdict_cache=_optional_path(os.environ.get("TUTAJEV_VERDICT_CACHE", "")),
     )
+
+
+def _optional_path(value: str) -> Path | None:
+    value = value.strip()
+    return Path(value).expanduser() if value else None
 
 
 def _parse_folders(value: str) -> tuple[str, ...]:

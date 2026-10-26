@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections.abc import Sequence
+from pathlib import Path
 from types import TracebackType
 from typing import Self
 
@@ -107,6 +108,7 @@ class FakeClassifier:
     def __init__(self, fail_on: str | None = None, fatal: bool = False) -> None:
         self.fail_on = fail_on
         self.fatal = fatal
+        self.classified: list[str] = []
 
     async def __aenter__(self) -> Self:
         return self
@@ -115,6 +117,7 @@ class FakeClassifier:
         pass
 
     async def classify(self, message: MessageSummary) -> Verdict:
+        self.classified.append(message.id)
         if self.fatal:
             raise ClassifierError("bad key")
         if message.subject == self.fail_on:
@@ -226,6 +229,44 @@ def test_failed_classification_is_never_moved(creds: None) -> None:
     )
     assert code == 0
     assert reader.moved == []
+
+
+def _cached_run(argv: list[str], classifier: FakeClassifier) -> int:
+    return main(
+        ["--format", "table", *argv, "--env-file", "/nonexistent"],
+        reader_factory=lambda s, allow_move: _two_messages(),
+        classifier_factory=lambda s: classifier,
+    )
+
+
+def test_verdict_cache_classifies_each_message_once(
+    creds: None, clean_env: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    clean_env.setenv("TUTAJEV_VERDICT_CACHE", str(tmp_path / "verdicts.json"))
+    first, second = FakeClassifier(fail_on="Plain hello"), FakeClassifier()
+
+    assert _cached_run([], first) == 0
+    first_out = capsys.readouterr().out
+    assert _cached_run([], second) == 0
+
+    assert first.classified == ["html_only.eml", "plain.eml"]
+    # The failed classification is retried; the verdict for the first message is reused.
+    assert second.classified == ["plain.eml"]
+    assert capsys.readouterr().out.splitlines()[0] == first_out.splitlines()[0]
+
+
+def test_no_cache_flag_ignores_cache(
+    creds: None, clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "verdicts.json"
+    clean_env.setenv("TUTAJEV_VERDICT_CACHE", str(path))
+    assert _cached_run(["--no-cache"], FakeClassifier()) == 0
+    assert not path.exists()
+
+    assert _cached_run([], FakeClassifier()) == 0
+    again = FakeClassifier()
+    assert _cached_run(["--no-cache"], again) == 0
+    assert again.classified == ["html_only.eml", "plain.eml"]
 
 
 @pytest.mark.parametrize(

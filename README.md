@@ -35,6 +35,12 @@ comparable:
 uv run tutajev --folder spam --all --limit 30 --format table --classifier clef-flash
 ```
 
+Set `TUTAJEV_VERDICT_CACHE` to a JSON file path to classify each message only once per backend.
+Unread mail is checked again on every run, and scores vary between calls, so without the cache a
+legitimate message that stays unread gets a new chance to cross the threshold each time. Failed
+classifications are not cached, entries unseen for 30 days are dropped, and `--no-cache` ignores the
+file for one run.
+
 The request to TypeSafe's or Cloudflare's API contains the sender, Reply-To, subject, the first 4000 characters of the body,
 the links and attachment metadata. It does not contain attachment contents.
 

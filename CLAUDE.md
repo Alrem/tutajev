@@ -42,6 +42,7 @@ The pipeline runs inside one Tuta session (`cli.run`): `MailboxReader.list_recen
 - By default the tool checks all unread messages (Mail field 109) of every folder in `TUTAJEV_FOLDERS`. `--all` switches to the newest N messages instead.
 - Custom folders are matched by their decrypted name.
 - The classifier (`TUTAJEV_CLASSIFIER` / `--classifier`: jev, clef, clef-flash) answers a single `Choice` with the labels legitimate, promotional, spam and phishing. `Verdict.spam_score` is P(spam) + P(phishing).
+- `TUTAJEV_VERDICT_CACHE` (`verdict_cache.py`) stores verdicts by classifier and message id, so each message is classified once; failures are not cached, `--no-cache` bypasses it. Jev scores vary between calls, so re-classifying unread mail every run would let legitimate mail drift over the threshold.
 - A message is moved when `spam_score >= --threshold` (default 0.9). Messages whose classification failed are never moved by score.
 - `--dmarc-rule` (`rules.dmarc_quarantined`) also moves messages whose Tuta-added `Authentication-Results` (authserv-id `*.tutanota.de`) say `dmarc=fail` with `dis=spam|quarantine|reject` and contain no `dkim=pass`. `build_rfc2822` drops the original headers, so the adapter prepends `Authentication-Results` from MailDetails field 1287 (Header 1271 plain / 1272 LZ4-compressed).
 

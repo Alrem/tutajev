@@ -21,6 +21,7 @@ from tutajev.models import MessageSummary, RawMessage
 from tutajev.output import Result, render_json, render_summary_table, render_text
 from tutajev.parsing import parse_message
 from tutajev.rules import dmarc_quarantined
+from tutajev.verdict_cache import VerdictCache
 
 logger = logging.getLogger(__name__)
 
@@ -82,20 +83,35 @@ def parse_all(raw_messages: Sequence[RawMessage]) -> list[MessageSummary]:
 
 
 async def classify_all(
-    classifier: SpamClassifier, summaries: Sequence[MessageSummary]
+    classifier: SpamClassifier,
+    summaries: Sequence[MessageSummary],
+    cache: VerdictCache | None = None,
 ) -> list[Result]:
+    """Classify ``summaries``, reusing and filling ``cache`` when given."""
     semaphore = asyncio.Semaphore(_CLASSIFY_CONCURRENCY)
+    cached = {m.id: v for m in summaries if cache and (v := cache.get(m.id)) is not None}
 
     async def one(message: MessageSummary) -> Result:
+        if message.id in cached:
+            return Result(message, verdict=cached[message.id])
         async with semaphore:
             try:
-                return Result(message, verdict=await classifier.classify(message))
+                verdict = await classifier.classify(message)
             except ClassifierError:
                 raise
             except Exception as exc:
                 logger.warning("Classification failed for %s: %s", message.id, exc)
                 return Result(message, error=str(exc))
+        if cache is not None:
+            cache.put(message.id, verdict)
+        return Result(message, verdict=verdict)
 
+    if cache is not None:
+        logger.info(
+            "Reusing %d cached verdict(s), classifying %d message(s)",
+            len(cached),
+            len(summaries) - len(cached),
+        )
     async with classifier:
         return list(await asyncio.gather(*(one(m) for m in summaries)))
 
@@ -175,7 +191,12 @@ async def run(
             summaries += parse_all(raw_messages)
         if classifier is None:
             return [Result(m) for m in summaries]
-        results = await classify_all(classifier, summaries)
+        cache = None
+        if settings.verdict_cache is not None and not args.no_cache:
+            cache = VerdictCache.load(settings.verdict_cache, settings.classifier)
+        results = await classify_all(classifier, summaries, cache)
+        if cache is not None:
+            cache.save()
         if args.move_spam:
             results = await move_spam(reader, results, args.threshold, apply, args.dmarc_rule)
     return results
@@ -248,6 +269,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("json", "text", "table"),
         default="json",
         help="'table' prints one line per message and implies --classify",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Classify every message again, ignoring and not updating TUTAJEV_VERDICT_CACHE",
     )
     parser.add_argument("--log-level", help="Overrides LOG_LEVEL")
     parser.add_argument("--env-file", default=".env")
