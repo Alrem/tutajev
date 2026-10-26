@@ -18,9 +18,16 @@ from tutajev.models import MessageSummary, RawMessage
 
 
 class FakeReader:
-    def __init__(self, messages: list[RawMessage], fail: bool = False) -> None:
+    def __init__(
+        self,
+        messages: list[RawMessage],
+        fail: bool = False,
+        folders: dict[str, set[str]] | None = None,
+    ) -> None:
         self.messages = messages
         self.fail = fail
+        # Ids per folder for list_ids; by default the listed messages are in the Inbox.
+        self.folders = folders if folders is not None else {"inbox": {m.id for m in messages}}
         self.calls: list[tuple[str, int | None, bool]] = []
         self.closed = False
         self.moved: list[str] = []
@@ -47,9 +54,15 @@ class FakeReader:
         self.calls.append((folder, limit, unread_only))
         return [dataclasses.replace(m, folder=folder) for m in self.messages[:limit]]
 
+    async def list_ids(self, folder: str) -> set[str]:
+        return set(self.folders.get(folder, set()))
+
     async def move_to_spam(self, message_ids: Sequence[str]) -> None:
         assert not self.closed, "moves must happen inside the session"
         self.moved.extend(message_ids)
+        for ids in self.folders.values():
+            ids.difference_update(message_ids)
+        self.folders.setdefault("spam", set()).update(message_ids)
 
 
 @pytest.fixture

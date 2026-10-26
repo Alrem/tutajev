@@ -3,6 +3,11 @@
 Jev's scores vary between calls, and unread mail is checked again every run. Without the cache a
 legitimate message that stays unread gets a new chance to cross the threshold each time.
 Failed classifications are not stored. Entries not seen for ``max_age`` are dropped on save.
+
+With ``--apply`` an entry also records what tutajev decided (``moved`` to Spam or ``kept``) and,
+once :mod:`tutajev.feedback` finds the message where that decision says it should not be, the
+``outcome`` (``missed`` or ``rescued``). An entry can hold a decision without a verdict, e.g. a
+message moved by the DMARC rule whose classification failed.
 """
 
 from __future__ import annotations
@@ -11,13 +16,17 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from tutajev.classifier.port import LABELS, Verdict
 
 logger = logging.getLogger(__name__)
+
+Decision = Literal["moved", "kept"]
+Outcome = Literal["missed", "rescued"]
 
 _VERSION = 1
 DEFAULT_MAX_AGE = timedelta(days=30)
@@ -60,7 +69,7 @@ class VerdictCache:
 
     def get(self, message_id: str) -> Verdict | None:
         entry = self._entries.get(self._key(message_id))
-        if entry is None:
+        if entry is None or "label" not in entry:
             return None
         try:
             label = entry["label"]
@@ -80,14 +89,49 @@ class VerdictCache:
 
     def put(self, message_id: str, verdict: Verdict) -> None:
         now = self._now.isoformat()
-        self._entries[self._key(message_id)] = {
-            "label": verdict.label,
-            "confidence": verdict.confidence,
-            "probabilities": verdict.probabilities,
-            "model": verdict.model,
-            "classified_at": now,
-            "last_seen": now,
-        }
+        self._entries.setdefault(self._key(message_id), {}).update(
+            label=verdict.label,
+            confidence=verdict.confidence,
+            probabilities=verdict.probabilities,
+            model=verdict.model,
+            classified_at=now,
+            last_seen=now,
+        )
+
+    def record_decision(
+        self,
+        message_id: str,
+        decision: Decision,
+        reason: str | None,
+        sender: str,
+        subject: str,
+    ) -> None:
+        """Remember what was done with a message, with enough context to report a mistake."""
+        now = self._now.isoformat()
+        self._entries.setdefault(self._key(message_id), {}).update(
+            decision=decision,
+            reason=reason,
+            sender=sender,
+            subject=subject,
+            decided_at=now,
+            last_seen=now,
+        )
+
+    def outcome(self, message_id: str) -> Outcome | None:
+        entry = self._entries.get(self._key(message_id))
+        return entry.get("outcome") if entry else None
+
+    def set_outcome(self, message_id: str, outcome: Outcome) -> None:
+        entry = self._entries[self._key(message_id)]
+        entry["outcome"] = outcome
+        entry["outcome_at"] = self._now.isoformat()
+
+    def decided(self) -> Iterator[tuple[str, dict[str, Any]]]:
+        """Yield ``(message_id, entry)`` for this classifier's entries that hold a decision."""
+        prefix = f"{self.classifier}:"
+        for key, entry in list(self._entries.items()):
+            if key.startswith(prefix) and entry.get("decision"):
+                yield key.removeprefix(prefix), entry
 
     def save(self) -> None:
         """Drop stale entries and write the file atomically; errors are logged, not raised."""

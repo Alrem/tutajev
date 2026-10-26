@@ -51,6 +51,15 @@ class MailboxReader(Protocol):
 
 
 @runtime_checkable
+class MailLocator(Protocol):
+    """Lists which messages a folder holds, without fetching or decrypting them."""
+
+    async def list_ids(self, folder: str) -> set[str]:
+        """Return the ids of all messages in ``folder``, as used by ``RawMessage.id``."""
+        ...
+
+
+@runtime_checkable
 class SpamMover(Protocol):
     """Moves messages to the Spam folder. The only mailbox mutation the application performs."""
 

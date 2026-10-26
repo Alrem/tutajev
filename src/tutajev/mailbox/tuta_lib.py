@@ -218,6 +218,13 @@ class TutaLibReader:
         results = await asyncio.gather(*(fetch(m) for m in newest))
         return [r for r in results if r is not None]
 
+    async def list_ids(self, folder: str) -> set[str]:
+        """Return the element ids of all messages in ``folder`` (entities only, no details)."""
+        self._require_session()
+        target = await self._find_folder(folder)
+        mails = await self._client.get_mails_in_folder(self._session, target.mail_list_id)
+        return {_element_id(m) for m in mails}
+
     async def move_to_spam(self, message_ids: Sequence[str]) -> None:
         """Move messages previously returned by :meth:`list_recent` to the Spam folder."""
         self._require_session()

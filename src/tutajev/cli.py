@@ -11,12 +11,13 @@ import asyncio
 import dataclasses
 import logging
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 
 from tutajev.classifier import ClassifierError, SpamClassifier
 from tutajev.config import CLASSIFIERS, ConfigError, Settings, load_settings
+from tutajev.feedback import MISTAKES_FILE, find_mistakes, log_mistakes, record_decisions
 from tutajev.logging_setup import configure_logging
-from tutajev.mailbox import MailboxError, MailboxReader, SpamMover
+from tutajev.mailbox import MailboxError, MailboxReader, MailLocator, SpamMover
 from tutajev.models import MessageSummary, RawMessage
 from tutajev.output import Result, render_json, render_summary_table, render_text
 from tutajev.parsing import parse_message
@@ -130,13 +131,19 @@ async def move_spam(
     threshold: float,
     apply: bool,
     dmarc_rule: bool = False,
+    keep: Collection[str] = (),
 ) -> list[Result]:
     """Move results whose spam score reaches ``threshold`` to Spam; only report unless ``apply``.
 
     With ``dmarc_rule``, messages that Tuta marked as failing DMARC with a quarantine or reject
     policy are moved too. Otherwise messages whose classification failed are never moved.
+    Ids in ``keep`` (messages the user already rescued from Spam) are never moved.
     """
     reasons = {r.message.id: _move_reason(r, threshold, dmarc_rule) for r in results}
+    for message_id in keep:
+        if reasons.get(message_id):
+            logger.info("Not moving %s: it was rescued from Spam before", message_id)
+            reasons[message_id] = None
     candidates = {message_id for message_id, reason in reasons.items() if reason}
     for r in results:
         if r.message.id in candidates:
@@ -194,12 +201,36 @@ async def run(
         cache = None
         if settings.verdict_cache is not None and not args.no_cache:
             cache = VerdictCache.load(settings.verdict_cache, settings.classifier)
-        results = await classify_all(classifier, summaries, cache)
-        if cache is not None:
-            cache.save()
-        if args.move_spam:
-            results = await move_spam(reader, results, args.threshold, apply, args.dmarc_rule)
+        try:
+            results = await classify_all(classifier, summaries, cache)
+            if args.move_spam:
+                # Mistakes are tracked only for real moves, against decisions of earlier runs.
+                if apply and cache is not None:
+                    await _find_mistakes(reader, cache, args.folder)
+                rescued = [m.id for m in summaries if cache and cache.outcome(m.id) == "rescued"]
+                results = await move_spam(
+                    reader, results, args.threshold, apply, args.dmarc_rule, keep=rescued
+                )
+                if apply and cache is not None:
+                    record_decisions(cache, results)
+        finally:
+            if cache is not None:
+                cache.save()
     return results
+
+
+async def _find_mistakes(
+    reader: MailboxReader, cache: VerdictCache, folders: Sequence[str]
+) -> None:
+    """Report earlier decisions the user has since corrected; runs before this run's moves."""
+    if not isinstance(reader, MailLocator):
+        return
+    try:
+        mistakes = await find_mistakes(reader, cache, folders)
+    except MailboxError as exc:
+        logger.warning("Could not check for mistakes: %s", exc)
+        return
+    log_mistakes(mistakes, cache.path.with_name(MISTAKES_FILE))
 
 
 def _threshold(value: str) -> float:

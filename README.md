@@ -41,6 +41,17 @@ legitimate message that stays unread gets a new chance to cross the threshold ea
 classifications are not cached, entries unseen for 30 days are dropped, and `--no-cache` ignores the
 file for one run.
 
+With the cache and `--move-spam --apply`, tutajev also tracks its mistakes. It records what it did
+with each message, and on later runs compares those decisions with where the messages are now:
+
+- `missed`: a message it kept is now in Spam (you moved it there);
+- `rescued`: a message it moved to Spam is back in one of the checked folders.
+
+Each mistake is logged once (`[missed]` / `[rescued]`) and appended to `mistakes.jsonl` next to the
+cache file. A rescued message is never moved to Spam by score or DMARC again. Decisions expire with
+the cache entries after 30 days, which matches Tuta's Spam retention. Messages rescued into a folder
+that is not checked, or deleted, are not detected.
+
 The request to TypeSafe's or Cloudflare's API contains the sender, Reply-To, subject, the first 4000 characters of the body,
 the links and attachment metadata. It does not contain attachment contents.
 

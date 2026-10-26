@@ -392,6 +392,15 @@ async def test_undecryptable_message_is_skipped() -> None:
     assert [r.id for r in raw_messages] == ["new", "old"]
 
 
+async def test_list_ids_returns_element_ids_without_fetching_details() -> None:
+    client = FakeTutaClient(_mails())
+    async with _reader(client) as reader:
+        assert await reader.list_ids("spam") == {"old", "new", "mid"}
+    assert "get_mails_in_folder:spam-list" in client.calls
+    # Nothing is decrypted, so the mail group key is never needed.
+    assert "get_mail_group_key" not in client.calls
+
+
 async def test_move_to_spam_uses_spam_system_folder() -> None:
     client = FakeTutaClient(_mails())
     async with _reader(client, allow_move=True) as reader:

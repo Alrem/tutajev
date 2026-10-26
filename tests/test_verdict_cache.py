@@ -66,3 +66,26 @@ def test_unwritable_path_does_not_raise(tmp_path: Path) -> None:
     cache = VerdictCache.load(blocker / "verdicts.json", "jev")
     cache.put("m1", SPAM)
     cache.save()
+
+
+def test_decision_without_verdict_is_not_a_cached_verdict(tmp_path: Path) -> None:
+    path = tmp_path / "verdicts.json"
+    cache = VerdictCache.load(path, "jev")
+    cache.record_decision("m1", "moved", "dmarc", "a@b.example", "Hi")
+    cache.save()
+
+    cache = VerdictCache.load(path, "jev")
+    assert cache.get("m1") is None
+    assert [(i, e["decision"], e["reason"]) for i, e in cache.decided()] == [
+        ("m1", "moved", "dmarc")
+    ]
+
+
+def test_put_keeps_decision_and_outcome(tmp_path: Path) -> None:
+    cache = VerdictCache.load(tmp_path / "verdicts.json", "jev")
+    cache.record_decision("m1", "kept", None, "a@b.example", "Hi")
+    cache.set_outcome("m1", "missed")
+    cache.put("m1", SPAM)
+
+    assert cache.get("m1") == SPAM
+    assert cache.outcome("m1") == "missed"
